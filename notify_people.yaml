@@ -1,0 +1,100 @@
+# notify_people: send one message to people by name, on their phone and in
+# Home Assistant's notification list. Automations name people, never a
+# notify.mobile_app_* action, so a new phone means changing one line here.
+alias: Notify people
+description: >-
+  Sends one message to one or more people by name. Use this instead of
+  notify.mobile_app_* in automations.
+mode: parallel
+max: 25
+fields:
+  recipients:
+    description: Who gets the message.
+    example: "[alice, bob]"
+    required: true
+    selector:
+      select:
+        multiple: true
+        # Keep in sync with "people" below.
+        options: [alice, bob]
+  title:
+    description: Title of the message.
+    example: "Basement: water detected"
+    selector:
+      text:
+  message:
+    description: The text.
+    required: true
+    selector:
+      text:
+        multiline: true
+  channel:
+    description: Android notification channel (own sound per channel); empty = default.
+    example: alarm
+    selector:
+      text:
+  priority:
+    description: high or normal.
+    default: normal
+    selector:
+      select:
+        options: [high, normal]
+  extra:
+    description: Other companion-app data, passed on as is (e.g. ttl, tag, actions).
+    example: "{ttl: 0}"
+    selector:
+      object:
+  persistent:
+    description: Also put the message in Home Assistant's notification list.
+    default: true
+    selector:
+      boolean:
+variables:
+  # The only place with action names: person -> their phone's notify action.
+  people:
+    alice: notify.mobile_app_alice_phone
+    bob: notify.mobile_app_bob_phone
+  # A single name given as text instead of a list still works.
+  to: "{{ [recipients] if recipients is string else recipients }}"
+  data: >-
+    {% set d = extra if extra is mapping else {} %}
+    {% if channel | default('') %}{% set d = dict(d, channel=channel) %}{% endif %}
+    {% if priority | default('normal') == 'high' %}{% set d = dict(d, priority='high') %}{% endif %}
+    {{ d }}
+sequence:
+  # First, and with continue_on_error: a failing phone must not keep the
+  # message out of Home Assistant, nor the other way round.
+  - if:
+      - condition: template
+        value_template: "{{ persistent | default(true) }}"
+    then:
+      - action: persistent_notification.create
+        continue_on_error: true
+        data:
+          title: "{{ title | default('') }}"
+          message: "{{ message }}"
+  # One call per person, each with continue_on_error, so one broken phone does
+  # not stop the message to the next.
+  - repeat:
+      for_each: "{{ to }}"
+      sequence:
+        - if:
+            - condition: template
+              value_template: "{{ repeat.item in people }}"
+          then:
+            - action: "{{ people[repeat.item] }}"
+              continue_on_error: true
+              data:
+                title: "{{ title | default('') }}"
+                message: "{{ message }}"
+                data: "{{ data }}"
+          else:
+            # An unknown name is a warning in the log, not silence.
+            - action: system_log.write
+              data:
+                level: warning
+                logger: script.notify_people
+                message: >-
+                  notify_people: unknown recipient '{{ repeat.item }}'
+                  (known: {{ people.keys() | join(', ') }}); message
+                  '{{ title | default('') }}' was not sent to them.
