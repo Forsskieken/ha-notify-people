@@ -66,6 +66,13 @@ Open a web page when the message is tapped:
         clickAction: https://www.example.com/
 ```
 
+## Programs outside Home Assistant
+
+This script gets a message **to people**. For a program on another machine that reports **to** Home Assistant:
+
+1. The program posts its state to a [webhook trigger](https://www.home-assistant.io/docs/automation/trigger/#webhook-trigger): no token needed.
+2. An automation decides when to notify (once per problem, or when the reports stop) and calls `script.notify_people`.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
